@@ -1,217 +1,143 @@
-$(document).ready(function() {
-    // Cargar usuarios al iniciar
+$(function(){
+    const btnRegistrar = $('#btnRegistrar');
+  
+    // Carga inicial
     cargarUsuarios();
+  
+    // Enviar registro
+    $('#formularioRegistro').on('submit', function(e){
+      e.preventDefault();
+      btnRegistrar.prop('disabled', true);
+  
+      let usuario = {
+        nombre_completo: $('#nombreCompleto').val().trim(),
+        email:            $('#email').val().trim(),
+        password:         $('#password').val(),
+        fecha_nacimiento: $('#fechaNacimiento').val()
+      };
+  
+      // Validaciones
+      if (!usuario.nombre_completo || !usuario.email 
+        || !usuario.password || !usuario.fecha_nacimiento) {
+        alert('Todos los campos son obligatorios');
+        btnRegistrar.prop('disabled', false);
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(usuario.email)) {
+        alert('Email con formato inválido');
+        btnRegistrar.prop('disabled', false);
+        return;
+      }
+      if (usuario.password.length < 6) {
+        alert('La contraseña debe tener al menos 6 caracteres');
+        btnRegistrar.prop('disabled', false);
+        return;
+      }
 
-    // Validación del formulario
-    $('#formularioRegistro').on('submit', function(e) {
-        e.preventDefault();
-        
-        // Validación del cliente
-        let nombre = $('#nombreCompleto').val().trim();
-        let email = $('#email').val().trim();
-        let password = $('#password').val();
-        let fechaNacimiento = $('#fechaNacimiento').val();
-        
-        if (!nombre || !email || !password || !fechaNacimiento) {
-            alert('Todos los campos son requeridos');
-            return;
+      if (new Date(usuario.fecha_nacimiento) > new Date()) {
+        alert('La fecha de nacimiento no puede ser futura');
+        btnRegistrar.prop('disabled', false);
+        return;
+      }
+  
+      $.ajax({
+        url: 'insertar.php', method:'POST',
+        contentType:'application/json', data: JSON.stringify(usuario),
+        dataType:'json'
+      }).done(resp=>{
+        alert(resp.message);
+        if (resp.success) {
+          $('#formularioRegistro')[0].reset();
+          cargarUsuarios();
         }
-        
-        if (!validarEmail(email)) {
-            alert('Por favor ingresa un email válido');
-            return;
-        }
-        
-        if (password.length < 6) {
-            alert('La contraseña debe tener al menos 6 caracteres');
-            return;
-        }
-        
-        // Enviar datos al servidor
-        registrarUsuario({
-            nombre_completo: nombre,
-            email: email,
-            password: password,
-            fecha_nacimiento: fechaNacimiento
-        });
+      }).fail(()=> alert('Error al registrar'))
+        .always(()=> btnRegistrar.prop('disabled', false));
     });
-    
-    // Función para cargar usuarios
-    function cargarUsuarios() {
-        $.ajax({
-            url: 'listar.php',
-            type: 'GET',
-            dataType: 'json',
-            success: function(response) {
-                if (response.success) {
-                    renderizarUsuarios(response.usuarios);
-                } else {
-                    console.error(response.message);
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('Error al cargar usuarios:', error);
-            }
-        });
+  
+    // Funciones AJAX
+    function cargarUsuarios(){
+      $.getJSON('listar.php', resp=>{
+        renderizarUsuarios(resp.usuarios||[]);
+      });
     }
-    
-    // Función para registrar usuario
-    function registrarUsuario(usuario) {
+  
+    function renderizarUsuarios(usuarios){
+      let tabla = $('#tablaUsuarios').empty();
+      if (!usuarios.length) {
+        tabla.append('<tr><td colspan="6" class="text-center">No hay usuarios</td></tr>');
+        return;
+      }
+      usuarios.forEach(u=>{
+        let fN = new Date(u.fecha_nacimiento).toLocaleDateString();
+        let fR = new Date(u.fecha_registro).toLocaleString();
+        tabla.append(`
+          <tr data-id="${u.id}">
+            <td>${u.id}</td>
+            <td>${u.nombre_completo}</td>
+            <td>${u.email}</td>
+            <td>${fN}</td>
+            <td>${fR}</td>
+            <td>
+              <button class="btn btn-sm btn-warning editar" data-id="${u.id}"><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-sm btn-danger eliminar" data-id="${u.id}"><i class="bi bi-trash"></i></button>
+            </td>
+          </tr>`);
+      });
+      // eventos
+      $('.eliminar').click(function(){
+        if (!confirm('¿Confirma eliminación?')) return;
+        let id = $(this).data('id');
         $.ajax({
-            url: 'insertar.php',
-            type: 'POST',
-            dataType: 'json',
-            contentType: 'application/json',
-            data: JSON.stringify(usuario),
-            success: function(response) {
-                if (response.success) {
-                    $('#formularioRegistro')[0].reset();
-                    cargarUsuarios();
-                    alert(response.message);
-                } else {
-                    alert(response.message);
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('Error al registrar usuario:', error);
-                alert('Error al registrar usuario');
-            }
+          url:'eliminar.php', method:'POST',
+          contentType:'application/json', data: JSON.stringify({id}),
+          dataType:'json'
+        }).done(r=>{
+          alert(r.message);
+          if (r.success) cargarUsuarios();
         });
+      });
+      $('.editar').click(function(){
+        let id = $(this).data('id');
+        let u = usuarios.find(x=>x.id==id);
+        if (!u) return;
+        $('#editId').val(u.id);
+        $('#editNombreCompleto').val(u.nombre_completo);
+        $('#editEmail').val(u.email);
+        $('#editFechaNacimiento').val(u.fecha_nacimiento);
+        new bootstrap.Modal($('#editarUsuarioModal')).show();
+      });
     }
-    
-    // Función para renderizar usuarios en la tabla
-    function renderizarUsuarios(usuarios) {
-        let tabla = $('#tablaUsuarios');
-        tabla.empty();
-        
-        if (usuarios.length === 0) {
-            tabla.append('<tr><td colspan="6" class="text-center">No hay usuarios registrados</td></tr>');
-            return;
+  
+    // Guardar edición
+    $('#guardarCambios').click(function(){
+      let btn = $(this).prop('disabled',false);
+      let usuario = {
+        id:                $('#editId').val(),
+        nombre_completo:   $('#editNombreCompleto').val().trim(),
+        email:             $('#editEmail').val().trim(),
+        fecha_nacimiento:  $('#editFechaNacimiento').val()
+      };
+      // mismas validaciones de fecha y email
+      if (!usuario.nombre_completo||!usuario.email||!usuario.fecha_nacimiento) {
+        alert('Todos los campos son obligatorios'); return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(usuario.email)) {
+        alert('Email inválido'); return;
+      }
+      if (new Date(usuario.fecha_nacimiento) > new Date()) {
+        alert('Fecha de nacimiento no puede ser futura'); return;
+      }
+      btn.prop('disabled', true);
+      $.ajax({
+        url:'actualizar.php', method:'POST',
+        contentType:'application/json', data: JSON.stringify(usuario),
+        dataType:'json'
+      }).done(r=>{
+        alert(r.message);
+        if (r.success) {
+          $('#editarUsuarioModal').modal('hide');
+          cargarUsuarios();
         }
-        
-        usuarios.forEach(usuario => {
-            let fechaNac = new Date(usuario.fecha_nacimiento).toLocaleDateString();
-            let fechaReg = new Date(usuario.fecha_registro).toLocaleString();
-            
-            let fila = `
-                <tr data-id="${usuario.id}">
-                    <td>${usuario.id}</td>
-                    <td>${usuario.nombre_completo}</td>
-                    <td>${usuario.email}</td>
-                    <td>${fechaNac}</td>
-                    <td>${fechaReg}</td>
-                    <td>
-                        <button class="btn btn-sm btn-warning editar-usuario" data-id="${usuario.id}">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="btn btn-sm btn-danger eliminar-usuario" data-id="${usuario.id}">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
-            
-            tabla.append(fila);
-        });
-        
-        // Asignar eventos a los botones
-        $('.editar-usuario').on('click', function() {
-            let id = $(this).data('id');
-            editarUsuario(id);
-        });
-        
-        $('.eliminar-usuario').on('click', function() {
-            let id = $(this).data('id');
-            eliminarUsuario(id);
-        });
-    }
-    
-    // Función para editar usuario
-    function editarUsuario(id) {
-        $.ajax({
-            url: 'listar.php',
-            type: 'GET',
-            dataType: 'json',
-            success: function(response) {
-                if (response.success) {
-                    let usuario = response.usuarios.find(u => u.id == id);
-                    if (usuario) {
-                        $('#editId').val(usuario.id);
-                        $('#editNombreCompleto').val(usuario.nombre_completo);
-                        $('#editEmail').val(usuario.email);
-                        $('#editFechaNacimiento').val(usuario.fecha_nacimiento);
-                        
-                        let modal = new bootstrap.Modal(document.getElementById('editarUsuarioModal'));
-                        modal.show();
-                    }
-                }
-            }
-        });
-    }
-    
-    // Guardar cambios al editar
-    $('#guardarCambios').on('click', function() {
-        let usuario = {
-            id: $('#editId').val(),
-            nombre_completo: $('#editNombreCompleto').val().trim(),
-            email: $('#editEmail').val().trim(),
-            fecha_nacimiento: $('#editFechaNacimiento').val()
-        };
-        
-        if (!usuario.nombre_completo || !usuario.email || !usuario.fecha_nacimiento) {
-            alert('Todos los campos son requeridos');
-            return;
-        }
-        
-        if (!validarEmail(usuario.email)) {
-            alert('Por favor ingresa un email válido');
-            return;
-        }
-        
-        $.ajax({
-            url: 'actualizar.php',
-            type: 'POST',
-            dataType: 'json',
-            contentType: 'application/json',
-            data: JSON.stringify(usuario),
-            success: function(response) {
-                if (response.success) {
-                    $('#editarUsuarioModal').modal('hide');
-                    cargarUsuarios();
-                    alert(response.message);
-                } else {
-                    alert(response.message);
-                }
-            }
-        });
+      }).always(()=> btn.prop('disabled', false));
     });
-    
-    // Función para eliminar usuario
-    function eliminarUsuario(id) {
-        if (!confirm('¿Estás seguro de que deseas eliminar este usuario?')) {
-            return;
-        }
-        
-        $.ajax({
-            url: 'eliminar.php',
-            type: 'POST',
-            dataType: 'json',
-            contentType: 'application/json',
-            data: JSON.stringify({ id: id }),
-            success: function(response) {
-                if (response.success) {
-                    cargarUsuarios();
-                    alert(response.message);
-                } else {
-                    alert(response.message);
-                }
-            }
-        });
-    }
-    
-    // Función auxiliar para validar email
-    function validarEmail(email) {
-        const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        return re.test(email);
-    }
-});
+  });  
